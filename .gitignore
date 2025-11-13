@@ -1,0 +1,5 @@
+__pycache__/
+# 忽略所有 .pyc, .pyo, .pyd 文件
+# 忽略任何目录下的字节码文件
+*.py[cod]
+*$py.class
