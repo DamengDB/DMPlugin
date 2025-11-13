@@ -3,17 +3,17 @@
 # This file should be included when you package your plugin.# Mandatory items:
 
 [general]
-name=DamengPlugin
+name=DMPlugin
 qgisMinimumVersion=3.0
-description=-TODO:Link to Dameng and import spatail data into the database
+description=-Link to Dameng database and import spatail data into QGIS
 version=0.1
 author=Dameng
 email=yangzhenyu@dameng.com
 
-about=-TODO:This plugin can connect to the Damon database to import spatial data into the database or export spatial data from the database.
+about=-This plugin can connect to the Dameng database to import spatial data into QGIS.
 
-tracker=https://github.com/Xunh-y/Dameng_Plugin/issues
-repository=https://github.com/Xunh-y/Dameng_Plugin
+tracker=https://github.com/DamengDB/DMPlugin/issues
+repository=https://github.com/DamengDB/DMPlugin
 # End of mandatory metadata
 
 # Recommended items:
@@ -25,7 +25,7 @@ hasProcessingProvider=no
 # Tags are comma separated with spaces allowed
 tags=python
 
-homepage=https://github.com/Xunh-y/Dameng_Plugin
+homepage=https://github.com/DamengDB/DMPlugin
 category=Database
 icon=icon.png
 # experimental flag
