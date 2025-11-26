@@ -10,7 +10,11 @@ version=0.1
 author=Dameng
 email=yangzhenyu@dameng.com
 
-about=-This plugin can connect to the Dameng database to import spatial data into QGIS.
+about=-This plugin is designed for Dameng Database. It can be used to connect to 
+Dameng Database and import the selected spatial data tables into QGIS (Quantum 
+Geographic Information System) for display as temporary layers. Additionally, the 
+plugin allows setting filter conditions for the data in the selected spatial data 
+tables, such as SRID (Spatial Reference Identifier), data type, and ROWNUM.
 
 tracker=https://github.com/DamengDB/DMPlugin/issues
 repository=https://github.com/DamengDB/DMPlugin
