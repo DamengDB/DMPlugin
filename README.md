@@ -1,8 +1,14 @@
-Dameng Plugin
+# Dameng Plugin
 
 This plugin was built with the Plugin Builder in QGIS.
 
 Please make sure the dmPython Python extensions are installed!
+
+## dmPython
+
+We recommend that you use the online installation method, with the command: pip install dmPython
+
+## Features
 
 This plugin is designed for Dameng Database. It can be used to connect to 
 
