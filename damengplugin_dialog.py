@@ -44,6 +44,8 @@ from qgis.core import (
     QgsVectorLayer, QgsGeometry, QgsFeature, QgsProject,
     QgsFields, QgsField, Qgis
 )
+from .sql_tag import tag  # 统一给 SQL 打审计标识注释（方案②）
+
 # This loads your .ui file so that PyQt can populate your plugin with the elements from Qt Designer
 #FORM_CLASS, _ = uic.loadUiType(os.path.join(
 #    os.path.dirname(__file__), 'damengplugin_dialog_base.ui'))
@@ -196,7 +198,7 @@ class DamengPluginDialog(QtWidgets.QDialog, FORM_CLASS):
             # Construct a query SQL
             sql = """SELECT SF_GET_UNICODE_FLAG();"""
             # Execute SQL
-            cursor.execute(sql)
+            cursor.execute(tag(sql))
             server_code = cursor.fetchone()
             if server_code[0] == 0:
                 self.conn.local_code = dmPython.PG_UTF8

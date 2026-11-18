@@ -46,6 +46,7 @@ from qgis.core import (
 )
 from .comboFilter import PopupFilter
 from .importWorker import ImportWorker
+from .sql_tag import tag  # 统一给 SQL 打审计标识注释（方案②）
 from decimal import Decimal
 from datetime import datetime, date, time
 # This loads your .ui file so that PyQt can populate your plugin with the elements from Qt Designer
@@ -138,7 +139,7 @@ class ImportDialog(QtWidgets.QDialog, FORM_CLASS):
         self.tableBox.activated[str].connect(self.table_box_change)
         self.columnBox.activated[str].connect(self.column_box_change)
         self.operateBox.activated[str].connect(self.operate_box_change)
-        self.typeBox.activated[str].connect(self.type_box_change)
+        # self.typeBox.activated[str].connect(self.type_box_change)
         self.addLayerButton.clicked.connect(self.add_layer_button_clicked)
         self.BackButton.clicked.connect(self.back_button_clicked)
         # Regular Expression: Only allow input of numbers (integers)
@@ -247,7 +248,7 @@ class ImportDialog(QtWidgets.QDialog, FORM_CLASS):
             #sql = """ SELECT USERNAME FROM ALL_USERS ORDER BY USERNAME;"""
             sql = """SELECT * FROM SYSOBJECTS where  TYPE$ ='SCH';"""
             # Execute SQL
-            cursor.execute(sql)
+            cursor.execute(tag(sql))
                 
             # Get all schema names (extract the first column of the query results)
             dbs = sorted([row[0] for row in cursor.fetchall()])
@@ -290,19 +291,30 @@ class ImportDialog(QtWidgets.QDialog, FORM_CLASS):
         try:
             # Construct a query SQL
             # Query all tables in the current schema
-            sql = """ SELECT TABLE_NAME FROM ALL_TABLES WHERE OWNER = ? ORDER BY TABLE_NAME;"""# nosec B608
-
+            # sql = """ SELECT TABLE_NAME FROM ALL_TABLES WHERE OWNER = ? ORDER BY TABLE_NAME;"""# nosec B608
+            sql = """SELECT TABLE_NAME, TYPE FROM ALL_TABLES LEFT JOIN SYSGEO2.GEOMETRY_COLUMNS ON ALL_TABLES.TABLE_NAME = SYSGEO2.GEOMETRY_COLUMNS.F_TABLE_NAME WHERE OWNER = ? AND F_TABLE_SCHEMA = ? ORDER BY TABLE_NAME;"""
             # Execute SQL
-            cursor.execute(sql, (self.schema_name))
-                
+            cursor.execute(tag(sql), (self.schema_name), (self.schema_name))    
+            all_rows = cursor.fetchall()            
+            tables = []
+            geometryTypes = []
             # Get all table names (extract the first column of the query results)
-            tables = sorted([row[0] for row in cursor.fetchall()])
+            for row in all_rows:
+                tables.append(str(row[0]))
+                # 几何类型为空时填充None，避免索引错误
+                geometryTypes.append(str(row[1]) if len(row) > 1 and row[1] is not None else None)
             if tables:
                 self.tableBox.addItems(tables)
                 self.tableBox.setCurrentIndex(-1)
                 self.tableBox.setEnabled(True)
             for i in range(self.tableBox.count()):
                 self.tableBox.setItemData(i, self.tableBox.itemText(i), Qt.ToolTipRole)
+                # 安全判断：仅当几何类型存在且为 ST_GEOMETRY 时禁用
+                if i < len(geometryTypes):
+                    geom_type = geometryTypes[i]
+                    if geom_type and str(geom_type).upper().startswith("ST_GEOMETRY"):
+                        self.tableBox.setItemData(i, QVariant(0), Qt.UserRole - 1)  # Disable item
+            # 安装弹窗过滤器
             self.tableBox.view().installEventFilter(PopupFilter(self.tableBox))
         except ValueError as e:
             QMessageBox.critical(self, "Input error", str(e))
@@ -338,7 +350,7 @@ class ImportDialog(QtWidgets.QDialog, FORM_CLASS):
             sql = """select F_GEOMETRY_COLUMN from sysgeo2.geometry_columns where F_TABLE_SCHEMA = ? and F_TABLE_NAME = ?;"""# nosec B608
 
             # Execute SQL
-            cursor.execute(sql, (self.schema_name), (self.table_name))
+            cursor.execute(tag(sql), (self.schema_name), (self.table_name))
                 
             # Get all column names (extract the first column of the query results)
             columns = sorted([row[0] for row in cursor.fetchall()])
@@ -383,7 +395,7 @@ class ImportDialog(QtWidgets.QDialog, FORM_CLASS):
             sql = "select dmgeo2.st_astext(?) from  ?.?;" # nosec B608
             
             # Execute SQL
-            cursor.execute(sql, (self.column_name), (self.schema_name), (self.table_name))
+            cursor.execute(tag(sql), (self.column_name), (self.schema_name), (self.table_name))
 
             # Get all data (extract the first column of the query results)
             datas = [row[0] for row in cursor.fetchall()]
@@ -412,11 +424,35 @@ class ImportDialog(QtWidgets.QDialog, FORM_CLASS):
         self.addLayerButton.setEnabled(False)
 
         self.column_name = self.columnBox.currentText()
+        cursor = self.conn.cursor()
+        try:
+            # Construct a query SQL
+            # Query all geometry columns in the current table
+            sql = """select SRID, TYPE from sysgeo2.geometry_columns where F_TABLE_SCHEMA = ? and F_TABLE_NAME = ? and F_GEOMETRY_COLUMN = ?;"""# nosec B608
 
-        self.operateBox.setEnabled(True)
-        self.typeBox.setEnabled(True)
-        self.sridEdit.setEnabled(True)
-
+            # Execute SQL
+            cursor.execute(tag(sql), (self.schema_name), (self.table_name), (self.column_name))
+                
+            # Get all column names (extract the first column of the query results)
+            row = cursor.fetchone()
+            if row:
+                self.typeBox.setCurrentIndex(self.typeBox.findText(self.dm_type_to_box(row[1]), Qt.MatchExactly|Qt.MatchCaseSensitive))
+                self.sridEdit.setText(str(row[0]))
+                self.operateBox.setEnabled(True)
+                self.typeBox.setEnabled(False)
+                self.sridEdit.setEnabled(False)
+                self.addLayerButton.setEnabled(True)
+        except ValueError as e:
+            QMessageBox.critical(self, "Input error", str(e))
+        except Exception as e:
+        # Capture other unknown errors
+            iface.messageBar().pushMessage(
+                "Change TableBox Error:", 
+                sql, 
+                level=Qgis.Critical)
+        finally:
+            if cursor:
+                cursor.close()    
 
     # The content of the operate drop-down list changes
     def operate_box_change(self):
@@ -437,9 +473,9 @@ class ImportDialog(QtWidgets.QDialog, FORM_CLASS):
 
 
     # When the content of the type drop-down list changes, set the "Add Layer" button to a clickable state
-    def type_box_change(self):
-        self.type_name = self.typeBox.currentText()
-        self.addLayerButton.setEnabled(True)
+    # def type_box_change(self):
+    #     self.type_name = self.typeBox.currentText()
+    #     self.addLayerButton.setEnabled(True)
 
 
     # Click the "Add Layer" button
@@ -650,46 +686,134 @@ class ImportDialog(QtWidgets.QDialog, FORM_CLASS):
                 level = Qgis.Critical)
             return ''
 
+ # Map the spatial types of DM (ST_Point, ST_LineString, ...) to the types of typeBox (Point, LineString, ...)
+    def dm_type_to_box(self, dm_type):
+        if dm_type == 'ST_POINT':
+            return 'Point'
+        elif dm_type == 'ST_LINESTRING':
+            return 'LineString'
+        elif dm_type == 'ST_POLYGON':
+            return 'Polygon'
+        elif dm_type == 'ST_MULTIPOINT':
+            return 'MultiPoint'
+        elif dm_type == 'ST_MULTILINESTRING':
+            return 'MultiLineString'
+        elif dm_type == 'ST_MULTIPOLYGON':
+            return 'MultiPolygon'
+        else:
+            iface.messageBar().pushMessage(
+                self.tr("dm_type has Error"),
+                level = Qgis.Critical)
+            return ''
 
     # Map Dameng data types to QVariant types in QGIS
     def dm_type_to_qgis(self, dm_type):
-        dm_type = dm_type.upper()
-        if "INT" in dm_type or "NUMBER" in dm_type and "DECIMAL" not in dm_type:
-            return QVariant.Int
-        elif "FLOAT" in dm_type or "DOUBLE" in dm_type or "DECIMAL" in dm_type:
-            return QVariant.Double
-        elif "TIME" in dm_type and "DATETIME" not in dm_type and "TIMESTAMP" not in dm_type:
-            return QVariant.Time
-        elif "DATE" in dm_type and "TIME" not in dm_type:
-            return QVariant.Date
-        elif "DATETIME" in dm_type or "TIMESTAMP" in dm_type:
-            return QVariant.DateTime
-        else:  # Strings, character types, and the like use String by default
+        """达梦类型 -> QVariant 类型。
+
+        关键修正：NUMBER(p,s) 必须按标度判断，s>0 一律用 Double。
+        旧写法 `"INT" in t or "NUMBER" in t ...` 会把 NUMBER(10,2)、NUMBER(12,8)
+        也判成 Int，坐标/面积这类小数会被 int() 直接截断（102.57 -> 102）。
+        """
+        if not dm_type:
             return QVariant.String
+        t = str(dm_type).upper().strip()
+        base = t.split("(")[0].strip()
+
+        if base in ("CHAR", "VARCHAR", "VARCHAR2", "NCHAR", "NVARCHAR", "NVARCHAR2",
+                    "TEXT", "CLOB", "BLOB", "LONGVARCHAR", "ROWID"):
+            return QVariant.String
+        if base in ("INT", "INTEGER", "SMALLINT", "TINYINT", "BYTEINT", "BIT"):
+            return QVariant.Int
+        if base == "BIGINT":
+            return getattr(QVariant, "LongLong", QVariant.Int)
+        if base in ("FLOAT", "DOUBLE", "REAL", "DECIMAL", "NUMERIC", "NUMBER", "DEC"):
+            if base in ("FLOAT", "DOUBLE", "REAL"):
+                return QVariant.Double
+            scale = 0
+            if "(" in t and ")" in t:
+                parts = [p.strip() for p in t[t.index("(") + 1:t.rindex(")")].split(",")]
+                if len(parts) == 2:
+                    try:
+                        scale = int(parts[1])
+                    except ValueError:
+                        scale = 0
+            return QVariant.Double if scale > 0 else QVariant.Int
+        if base == "DATE":
+            return QVariant.Date
+        if base == "TIME":
+            return QVariant.Time
+        if base in ("TIMESTAMP", "DATETIME"):
+            return QVariant.DateTime
+        return QVariant.String
 
 
     def get_table_fields(self):
         # Dynamically obtain the non-spatial field metadata of the table (field name, data type)
         cursor = self.conn.cursor()
         try:
-            # Query all fields of the table (excluding spatial columns)
+            # 关键：DATA_TYPE 只有基类型（NUMBER / VARCHAR2），精度和标度在
+            # DATA_PRECISION / DATA_SCALE 里，必须一起取，否则 NUMBER(18,2)
+            # 会被当成整数，4.8e15 这类值写图层时溢出被拒
             sql = """
-                SELECT COLUMN_NAME, DATA_TYPE 
-                FROM ALL_TAB_COLUMNS 
-                WHERE OWNER = ? 
+                SELECT COLUMN_NAME, DATA_TYPE, DATA_PRECISION, DATA_SCALE
+                FROM ALL_TAB_COLUMNS
+                WHERE OWNER = ?
                   AND TABLE_NAME = ?
                   AND COLUMN_NAME != ?
                 ORDER BY COLUMN_ID
             """# nosec B608
-            cursor.execute(sql, (self.schema_name), (self.table_name), (self.column_name))
-            fields = cursor.fetchall()  # Format: [(Field Name 1, Type 1), (Field Name 2, Type 2), ...]
+            try:
+                cursor.execute(tag(sql), (self.schema_name), (self.table_name), (self.column_name))
+                rows = cursor.fetchall()
+            except dmPython.DatabaseError:
+                # 兼容没有 DATA_PRECISION / DATA_SCALE 的视图：退回只取两列的写法
+                sql_basic = """
+                    SELECT COLUMN_NAME, DATA_TYPE
+                    FROM ALL_TAB_COLUMNS
+                    WHERE OWNER = ?
+                      AND TABLE_NAME = ?
+                      AND COLUMN_NAME != ?
+                    ORDER BY COLUMN_ID
+                """# nosec B608
+                cursor.execute(tag(sql_basic), (self.schema_name), (self.table_name),
+                               (self.column_name))
+                rows = [(r[0], r[1], None, None) for r in cursor.fetchall()]
+            # 兜底：不管 SQL 的 COLUMN_NAME != ? 是否命中（大小写/空格差异），
+            # 都再在 Python 侧剔除几何列，避免几何对象混进属性列导致整批写不进图层
+            geom_col = (self.column_name or "").strip().lower()
+            fields = []
+            for row in rows:
+                name = row[0]
+                if (str(name) or "").strip().lower() == geom_col:
+                    continue
+                fields.append((name, self._compose_dm_type(row)))
             return fields
         except dmPython.DatabaseError as e:
-            iface.messageBar().pushCritical(self.tr("Could not find data"), f"{e.message}")
+            iface.messageBar().pushCritical(self.tr("Could not find data"), f"{str(e)}")
             return []
         finally:
             if cursor:
                 cursor.close()
+
+
+    @staticmethod
+    def _compose_dm_type(row):
+        """把 (DATA_TYPE, DATA_PRECISION, DATA_SCALE) 还原成 NUMBER(18,2) 这类完整类型串。"""
+        base = (str(row[1]) or "").upper().strip()
+        precision = row[2] if len(row) > 2 else None
+        scale = row[3] if len(row) > 3 else None
+        numeric = ("NUMBER", "DECIMAL", "NUMERIC", "DEC")
+        if base in numeric and precision is not None:
+            try:
+                return f"{base}({int(precision)},{int(scale or 0)})"
+            except (TypeError, ValueError):
+                return base
+        if base in ("VARCHAR2", "VARCHAR", "CHAR", "NVARCHAR2", "NCHAR") and precision is not None:
+            try:
+                return f"{base}({int(precision)})"
+            except (TypeError, ValueError):
+                return base
+        return base
 
 
     # Import the memory layer
@@ -731,7 +855,6 @@ class ImportDialog(QtWidgets.QDialog, FORM_CLASS):
         """查询所有属性字段和空间列WKT"""
         try:
             #cursor = self.conn.cursor()
-
             escaped_attr_fields = []
             # 1.Validate and escape all attribute field names
             for f in fields:
@@ -750,7 +873,7 @@ class ImportDialog(QtWidgets.QDialog, FORM_CLASS):
                     SELECT {attr_fields}, dmgeo2.st_astext({escaped_column_name}) FROM {escaped_schema_name}.{escaped_table_name}
                     WHERE dmgeo2.st_srid({escaped_column_name}) = ? and dmgeo2.st_geometrytype({escaped_column_name}) = ?;
                 """# nosec B608
-                self.cursor.execute(sql, (self.srid), (self.typebox_type_to_dm(self.type_name)))
+                self.cursor.execute(tag(sql), (self.srid), (self.typebox_type_to_dm(self.type_name)))
             elif self.operator == '>=v1 and <=v2':
                 # Construct a query SQL
                 sql = f"""
@@ -762,7 +885,7 @@ class ImportDialog(QtWidgets.QDialog, FORM_CLASS):
                     )
                     WHERE rn >= ? and rn <= ? and dmgeo2.st_srid({escaped_column_name}) = ? and dmgeo2.st_geometrytype({escaped_column_name}) = ?;
                 """# nosec B608
-                self.cursor.execute(sql, (int64_max), (self.limit_min), (self.limit_max), (self.srid), (self.typebox_type_to_dm(self.type_name)))
+                self.cursor.execute(tag(sql), (int64_max), (self.limit_min), (self.limit_max), (self.srid), (self.typebox_type_to_dm(self.type_name)))
             elif self.operator == '>=':
                 # Construct a query SQL
                 sql = f"""
@@ -774,7 +897,7 @@ class ImportDialog(QtWidgets.QDialog, FORM_CLASS):
                     )
                     WHERE rn >= ? and dmgeo2.st_srid({escaped_column_name}) = ? and dmgeo2.st_geometrytype({escaped_column_name}) = ?;
                 """# nosec B608
-                self.cursor.execute(sql, (int64_max), (self.limit), (self.srid), (self.typebox_type_to_dm(self.type_name)))
+                self.cursor.execute(tag(sql), (int64_max), (self.limit), (self.srid), (self.typebox_type_to_dm(self.type_name)))
             elif self.operator == '>':
                 # Construct a query SQL
                 sql = f"""
@@ -786,7 +909,7 @@ class ImportDialog(QtWidgets.QDialog, FORM_CLASS):
                     )
                     WHERE rn > ? and dmgeo2.st_srid({escaped_column_name}) = ? and dmgeo2.st_geometrytype({escaped_column_name}) = ?;
                 """# nosec B608
-                self.cursor.execute(sql, (int64_max), (self.limit), (self.srid), (self.typebox_type_to_dm(self.type_name)))
+                self.cursor.execute(tag(sql), (int64_max), (self.limit), (self.srid), (self.typebox_type_to_dm(self.type_name)))
             elif self.operator == '=':
                 # Construct a query SQL
                 sql = f"""
@@ -798,7 +921,7 @@ class ImportDialog(QtWidgets.QDialog, FORM_CLASS):
                     )
                     WHERE rn = ? and dmgeo2.st_srid({escaped_column_name}) = ? and dmgeo2.st_geometrytype({escaped_column_name}) = ?;
                 """# nosec B608
-                self.cursor.execute(sql, (int64_max), (self.limit), (self.srid), (self.typebox_type_to_dm(self.type_name)))
+                self.cursor.execute(tag(sql), (int64_max), (self.limit), (self.srid), (self.typebox_type_to_dm(self.type_name)))
             elif self.operator == '<=':
                 # Construct a query SQL
                 sql = f"""
@@ -810,7 +933,7 @@ class ImportDialog(QtWidgets.QDialog, FORM_CLASS):
                     )
                     WHERE rn <= ? and dmgeo2.st_srid({escaped_column_name}) = ? and dmgeo2.st_geometrytype({escaped_column_name}) = ?;
                 """# nosec B608
-                self.cursor.execute(sql, (int64_max), (self.limit), (self.srid), (self.typebox_type_to_dm(self.type_name)))
+                self.cursor.execute(tag(sql), (int64_max), (self.limit), (self.srid), (self.typebox_type_to_dm(self.type_name)))
             else:
                 # Construct a query SQL
                 sql = f"""
@@ -821,8 +944,8 @@ class ImportDialog(QtWidgets.QDialog, FORM_CLASS):
                         WHERE rownum <= ?
                     )
                     WHERE rn < ? and dmgeo2.st_srid({escaped_column_name}) = ? and dmgeo2.st_geometrytype({escaped_column_name}) = ?;
-                """# nosec B608
-                self.cursor.execute(sql, (int64_max), (self.limit), (self.srid), (self.typebox_type_to_dm(self.type_name)))
+                """# nosec B608                
+                self.cursor.execute(tag(sql), (int64_max), (self.limit), (self.srid), (self.typebox_type_to_dm(self.type_name)))
             return
         except dmPython.DatabaseError as e:
             iface.messageBar().pushMessage(
@@ -844,10 +967,10 @@ class ImportDialog(QtWidgets.QDialog, FORM_CLASS):
                 SELECT count(*)
                 FROM {escaped_schema_name}.{escaped_table_name};
             """# nosec B608
-            cursor.execute(sql)
+            cursor.execute(tag(sql))
             return cursor.fetchone()
         except dmPython.DatabaseError as e:
-            iface.messageBar().pushCritical(self.tr("Could not get total size"), f"{e.message}")
+            iface.messageBar().pushCritical(self.tr("Could not get total size"), f"{str(e)}")
             return []
         finally:
             if cursor:
