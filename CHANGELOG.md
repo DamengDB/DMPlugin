@@ -8,7 +8,7 @@ All notable changes to the DMPlugin (QGIS ↔ Dameng Database) project are docum
 
 ### 新增
 
-- **SQL 审计标识（方案 ②）**：新增 `sql_tag.py`，提供常量 `SQL_TAG = "/* QGIS-DMPlugin */"` 与 `tag(sql)`。标识中**不含版本号**，避免每次发版都要更新；审计侧统一用 `SQL_TEXT LIKE '%QGIS-DMPlugin%'` 匹配。
+- **SQL 审计标识（方案 ②）**：新增 `sql_tag.py`，提供常量 `SQL_TAG = "/***QGIS-DMPlugin***/"` 与 `tag(sql)`。标识中**不含版本号**，避免每次发版都要更新；审计侧统一用 `SQL_TEXT LIKE '%QGIS-DMPlugin%'` 匹配。
   - `import_dialog.py` 全部 16 处 `cursor.execute` 已统一走 `tag()`；
   - `damengplugin_dialog.py` 的 `SELECT SF_GET_UNICODE_FLAG()` 同样打标；
   - 已含 `/* ... */` 注释的 SQL 不会重复叠加，空串原样返回。

@@ -24,7 +24,7 @@ repository=https://github.com/DamengDB/DMPlugin
 
 hasProcessingProvider=no
 # Uncomment the following line and add your changelog:
-changelog=0.2.0：新增 SQL 审计标识（SQL 前置 /* QGIS-DMPlugin */ 注释，便于在达梦 V$AUDITRECORDS.SQL_TEXT 中识别来源）；
+changelog=0.2.0：新增 SQL 审计标识（SQL 前置 /***QGIS-DMPlugin***/ 注释，便于在达梦 V$AUDITRECORDS.SQL_TEXT 中识别来源）；
            图层几何类型改为按数据的真实 wkbType 建立，单类型自动转多类型；
            整批写入被拒时逐条重试并定位第一条失败要素，属性值做类型校验与超界检查，重复报错限流并汇总；
            NUMBER(p,s) 按标度映射（s>0 为浮点），修复小数被截断与 NUMBER(18,2) 大数溢出导致的整批写入失败；

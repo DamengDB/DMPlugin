@@ -10,7 +10,7 @@ SQL_TEXT / MAC）本身没有"客户端工具 / 程序名"字段，SQL_TEXT 是�
 承载来源标识的位置，因此统一加注释是最可靠的落地方式。
 """
 
-SQL_TAG = "/* QGIS-DMPlugin */"
+SQL_TAG = "/***QGIS-DMPlugin***/"
 
 
 def tag(sql):
